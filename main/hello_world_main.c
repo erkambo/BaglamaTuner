@@ -27,6 +27,8 @@ float yin_algorithm(float *buffer) {
     }
 
     // Step 1: Difference Function
+    // Tau is our time shift. We compare the signal within the window with a time shifted bersion of itself.
+    // If tau equals the period of the wave, the difference will be very close to zero (as they line up perfectly)
     for(int tau = 1; tau < YIN_MAX_LAG; tau++){
         for(int i = 0; i < YIN_WINDOW_SIZE; i++){
             float delta = (buffer[i] - buffer[i+tau]);
@@ -34,7 +36,8 @@ float yin_algorithm(float *buffer) {
         } 
     }
 
-    // Step 2: CMNDF 
+    // Step 2: CMNDF (Cumulative mean normalized difference)
+    // We wil lnormalize the Difference Function by dividing by the average over shorter lag values
     float running_sum = 0.0f;
     for (int tau = 1; tau < YIN_MAX_LAG; tau++){ 
         running_sum += yin_buffer[tau];
@@ -42,17 +45,21 @@ float yin_algorithm(float *buffer) {
     }
     
     // Step 3: Absolute Thresholding
+    // We have errors due to perfect periodicity. This leads to Octave errors To fix this, set a small threshold of 0.1 
+    // and choose the smallest lag value below this threshold
     int period = 0;
     for (int tau = 1; tau < YIN_MAX_LAG - 1; tau++) {
         if(yin_buffer[tau] < 0.1f && yin_buffer[tau + 1] > yin_buffer[tau]) {
-            period = tau;
+            period = tau;   // save tge index.
             break;
         }
     }
 
     if (period == 0) return 0.0f;
 
-    // Step 4: Parabolic Interpolation 
+    // Step 4: Parabolic Interpolation (Limits quantization error)
+    // We shift the discrete signal sample by sample tofind the pitch. However, we can have half samples, quarter samples, etc.
+    // In that case, we can use interpolation to estimate the frequency by lookign at the neighbours.
     float s0 = yin_buffer[period - 1];
     float s1 = yin_buffer[period];
     float s2 = yin_buffer[period + 1];
@@ -67,7 +74,7 @@ float yin_algorithm(float *buffer) {
 void core1_task(void *pvParam){ 
     // Generate the perfect 293.66 Hz wave
     for (int i = 0; i < BUF_SIZE; i++){
-        sin_buffer[i] = sin(2.0 * M_PI * 293.66 * ((float)i / 16000.0));
+        sin_buffer[i] = sin(2.0 * M_PI * 293.66 * ((float)i / 16000.0));    //Create a sin wave to test out YIN alg
     }
 
     while(1) {
@@ -87,6 +94,6 @@ void core0_task(void *pvParam){
 
 void app_main(void) {
     printf("Initializing DSP Tuner Pipeline...\n");
-    xTaskCreatePinnedToCore(core1_task, "DSP_Task", 4096, NULL, 1, NULL, 1);
+    xTaskCreatePinnedToCore(core1_task, "DSP_Task", 4096, NULL, 1, NULL, 1);    //1 and 0 are for core ids.
     xTaskCreatePinnedToCore(core0_task, "Display_Task", 2048, NULL, 1, NULL, 0);
 }
