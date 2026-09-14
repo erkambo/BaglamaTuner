@@ -8,17 +8,23 @@
 #include "esp_flash.h"
 #include "esp_system.h"
 
+#include "adc_cal.h"
+
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
 
-#define SAMPLING_RATE 16000
+#define SAMPLING_RATE 20000
 #define YIN_MAX_LAG  250      
 #define YIN_WINDOW_SIZE  300 
 #define BUF_SIZE 1024
 
+// ADC_FRAME_SAMPLES comes from adc_cal.h (= 512 on ESP32)
+
 float yin_buffer[YIN_MAX_LAG];
 float sin_buffer[BUF_SIZE];
+
+
 
 float yin_algorithm(float *buffer) {
     yin_buffer[0] = 1.0f; 
@@ -70,17 +76,21 @@ float yin_algorithm(float *buffer) {
     return (float)SAMPLING_RATE / exact_period;
 }
 
+//ESP32 I2S DMA will be here. Goal is to read the pitch of noise using the YIN algorithm and a circular buffer.
+
 // DSP Task - Pinned to Core 1
 void core1_task(void *pvParam){ 
-    // Generate the perfect 293.66 Hz wave
-    for (int i = 0; i < BUF_SIZE; i++){
-        sin_buffer[i] = sin(2.0 * M_PI * 293.66 * ((float)i / 16000.0));    //Create a sin wave to test out YIN alg
-    }
+    ADC_Initialization(); //init adc
+
+    float audio_buffer[ADC_FRAME_SAMPLES];
 
     while(1) {
-        float detected_freq = yin_algorithm(sin_buffer);
-        printf("Core 1 DSP Output: %.2f Hz\n", detected_freq);
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        if(read_ADC_continuous(audio_buffer)){
+            //print sample from array:
+            char line[64];
+            snprintf(line, sizeof(line), "Core 1 ADC Sample: %d", (int)audio_buffer[0]);
+            puts(line);
+        }
     }
 }
 
@@ -94,6 +104,6 @@ void core0_task(void *pvParam){
 
 void app_main(void) {
     printf("Initializing DSP Tuner Pipeline...\n");
-    xTaskCreatePinnedToCore(core1_task, "DSP_Task", 4096, NULL, 1, NULL, 1);    //1 and 0 are for core ids.
+    xTaskCreatePinnedToCore(core1_task, "DSP_Task", 8192, NULL, 1, NULL, 1);    //1 and 0 are for core ids.
     xTaskCreatePinnedToCore(core0_task, "Display_Task", 2048, NULL, 1, NULL, 0);
 }
